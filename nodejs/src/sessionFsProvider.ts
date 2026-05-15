@@ -7,7 +7,7 @@ import type {
     SessionFsError,
     SessionFsStatResult,
     SessionFsReaddirWithTypesEntry,
-    SessionFsSqliteResult,
+    SessionFsSqliteQueryResult as GeneratedSqliteQueryResult,
     SessionFsSqliteQueryType,
 } from "./generated/rpc.js";
 
@@ -21,11 +21,35 @@ export type { SessionFsSqliteQueryType };
 export type SessionFsFileInfo = Omit<SessionFsStatResult, "error">;
 
 /**
- * Result of a SQLite query execution via {@link SessionFsProvider.sqlite}.
- * Same shape as the generated {@link SessionFsSqliteResult} but without the
+ * Result of a SQLite query execution via {@link SessionFsSqliteProvider.query}.
+ * Same shape as the generated {@link GeneratedSqliteQueryResult} but without the
  * `error` field, since providers signal errors by throwing.
  */
-export type SessionFsSqliteQueryResult = Omit<SessionFsSqliteResult, "error">;
+export type SessionFsSqliteQueryResult = Omit<GeneratedSqliteQueryResult, "error">;
+
+/**
+ * SQLite operations for the per-session database.
+ * Implementers provide query execution and existence checking.
+ */
+export interface SessionFsSqliteProvider {
+    /**
+     * Execute a SQLite query against the per-session database.
+     *
+     * @param queryType - How to execute: `"exec"` for DDL/multi-statement, `"query"` for SELECT, `"run"` for INSERT/UPDATE/DELETE.
+     * @param query - SQL query to execute.
+     * @param params - Optional named bind parameters.
+     */
+    query(
+        queryType: SessionFsSqliteQueryType,
+        query: string,
+        params?: Record<string, string | number | null>,
+    ): Promise<SessionFsSqliteQueryResult | undefined>;
+
+    /**
+     * Check whether the per-session database already exists, without creating it.
+     */
+    exists(): Promise<boolean>;
+}
 
 /**
  * Interface for session filesystem providers. Implementers use idiomatic
@@ -67,22 +91,8 @@ export interface SessionFsProvider {
     /** Renames/moves a file or directory. */
     rename(src: string, dest: string): Promise<void>;
 
-    /**
-     * Execute a SQLite query against a named database within this session's storage.
-     * Optional — if provided, the runtime routes SQL through this handler instead of
-     * using a local SQLite database on the host.
-     *
-     * @param dbName - Logical database name (e.g., `"session"`).
-     * @param queryType - How to execute: `"exec"` for DDL/multi-statement, `"query"` for SELECT, `"run"` for INSERT/UPDATE/DELETE.
-     * @param query - SQL query to execute.
-     * @param params - Optional named bind parameters.
-     */
-    sqlite(
-        dbName: string,
-        queryType: SessionFsSqliteQueryType,
-        query: string,
-        params?: Record<string, string | number | null>,
-    ): Promise<SessionFsSqliteQueryResult | undefined>;
+    /** Per-session SQLite database operations. */
+    sqlite: SessionFsSqliteProvider;
 }
 
 /**
@@ -177,9 +187,12 @@ export function createSessionFsAdapter(provider: SessionFsProvider): SessionFsHa
                 return toSessionFsError(err);
             }
         },
-        sqlite: async ({ dbName, queryType, query, params: bindParams }) => {
-            const result = await provider.sqlite(dbName, queryType, query, bindParams);
+        sqliteQuery: async ({ queryType, query, params: bindParams }) => {
+            const result = await provider.sqlite.query(queryType, query, bindParams);
             return result ?? { rows: [], columns: [], rowsAffected: 0 };
+        },
+        sqliteExists: async () => {
+            return { exists: await provider.sqlite.exists() };
         },
     };
 }
