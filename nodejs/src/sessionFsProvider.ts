@@ -77,7 +77,7 @@ export interface SessionFsProvider {
      * @param query - SQL query to execute.
      * @param params - Optional named bind parameters.
      */
-    sqlite?(
+    sqlite(
         dbName: string,
         queryType: SessionFsSqliteQueryType,
         query: string,
@@ -178,9 +178,6 @@ export function createSessionFsAdapter(provider: SessionFsProvider): SessionFsHa
             }
         },
         sqlite: async ({ dbName, queryType, query, params: bindParams }) => {
-            if (!provider.sqlite) {
-                throw new Error("SQLite not implemented by this provider");
-            }
             const result = await provider.sqlite(dbName, queryType, query, bindParams);
             return result ?? { rows: [], columns: [], rowsAffected: 0 };
         },
